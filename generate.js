@@ -1,0 +1,156 @@
+#!/usr/bin/env node
+/**
+ * PrivacyScreen — paints a natural-looking contribution graph.
+ * Creates backdated commits across the last N years with varied daily intensity.
+ */
+
+import { execSync } from "node:child_process";
+import { appendFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = __dirname;
+const LOG = resolve(ROOT, "screen.log");
+
+// --- knobs ---
+const YEARS = 3;
+const SEED = process.env.PRIVACY_SEED
+  ? Number(process.env.PRIVACY_SEED)
+  : Date.now() % 1e9;
+
+/** Target density: fraction of days with at least one commit (weekdays). */
+const WEEKDAY_ACTIVE = 0.82;
+/** Weekend activity rate (usually a bit lower). */
+const WEEKEND_ACTIVE = 0.55;
+/** Max commits on a single day (GitHub caps visual intensity around 4+). */
+const MAX_COMMITS = 8;
+
+// Mulberry32 PRNG — reproducible if you set PRIVACY_SEED
+function mulberry32(a) {
+  return function () {
+    let t = (a += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t = (t ^ (t >>> 7)) + Math.imul(t ^ (t >>> 61), t | 1);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const rand = mulberry32(SEED);
+
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+
+function formatDate(d) {
+  // Midday UTC avoids timezone edge cases flipping the contribution day
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T14:${pad(Math.floor(rand() * 60))}:${pad(Math.floor(rand() * 60))}`;
+}
+
+function dayUTC(d) {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+function commitsForDay(isWeekend) {
+  const chance = isWeekend ? WEEKEND_ACTIVE : WEEKDAY_ACTIVE;
+  if (rand() > chance) return 0;
+
+  // Weighted intensity: more light/medium days than heavy — looks organic
+  const roll = rand();
+  if (roll < 0.42) return 1;
+  if (roll < 0.68) return 2;
+  if (roll < 0.84) return 3;
+  if (roll < 0.93) return 4 + Math.floor(rand() * 2); // 4–5
+  return 6 + Math.floor(rand() * (MAX_COMMITS - 5)); // 6–8
+}
+
+function git(cmd, env = {}) {
+  execSync(cmd, {
+    cwd: ROOT,
+    env: { ...process.env, ...env },
+    stdio: "pipe",
+  });
+}
+
+function resetHistory() {
+  if (existsSync(LOG)) unlinkSync(LOG);
+  // Soft reset to orphan if repo already has history from a prior run
+  try {
+    git("git checkout --orphan privacy-temp");
+    git("git rm -rf --cached . 2>/dev/null || true");
+  } catch {
+    /* fresh repo */
+  }
+}
+
+function main() {
+  const reset = process.argv.includes("--reset");
+  console.log(`PrivacyScreen seed=${SEED} years=${YEARS}`);
+
+  if (!existsSync(resolve(ROOT, ".git"))) {
+    git("git init -b main");
+  }
+
+  if (reset) {
+    console.log("Resetting prior screen commits…");
+    resetHistory();
+  }
+
+  const end = dayUTC(new Date());
+  const start = new Date(end);
+  start.setUTCFullYear(start.getUTCFullYear() - YEARS);
+
+  // Seed file so first commit has content
+  if (!existsSync(LOG)) {
+    writeFileSync(LOG, `# PrivacyScreen\n# seed=${SEED}\n`);
+  }
+
+  let totalCommits = 0;
+  let activeDays = 0;
+  const cursor = new Date(start);
+
+  while (cursor <= end) {
+    const dow = cursor.getUTCDay(); // 0 Sun … 6 Sat
+    const isWeekend = dow === 0 || dow === 6;
+    const n = commitsForDay(isWeekend);
+
+    if (n > 0) activeDays += 1;
+
+    for (let i = 0; i < n; i++) {
+      const when = formatDate(cursor);
+      // Slight per-commit time jitter already in formatDate via minutes/seconds
+      const stamp = `${when} +0000`;
+      appendFileSync(
+        LOG,
+        `${when} #${totalCommits + 1} d=${cursor.toISOString().slice(0, 10)}\n`
+      );
+      git("git add screen.log");
+      git(`git commit -m "screen: ${cursor.toISOString().slice(0, 10)}/${i + 1}"`, {
+        GIT_AUTHOR_DATE: stamp,
+        GIT_COMMITTER_DATE: stamp,
+      });
+      totalCommits += 1;
+    }
+
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+
+    if (totalCommits > 0 && totalCommits % 200 === 0) {
+      process.stdout.write(`  … ${totalCommits} commits\n`);
+    }
+  }
+
+  // Ensure we're on main
+  try {
+    git("git branch -M main");
+  } catch {
+    /* already main */
+  }
+
+  console.log(
+    `\nDone. ${totalCommits} commits across ${activeDays} active days (${YEARS} years).`
+  );
+  console.log("Push to GitHub, then wait a minute for the contribution graph to refresh.");
+  console.log(`Re-run with the same look: PRIVACY_SEED=${SEED} npm run generate -- --reset`);
+}
+
+main();
