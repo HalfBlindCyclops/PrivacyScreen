@@ -15,6 +15,10 @@ const LOG = resolve(ROOT, "screen.log");
 
 // --- knobs ---
 const YEARS = 3;
+/** Prefer Gmail for GitHub graph attribution; override with GIT_AUTHOR_EMAIL if needed. */
+const AUTHOR_EMAIL =
+  process.env.GIT_AUTHOR_EMAIL || "seanwwetherell@gmail.com";
+const AUTHOR_NAME = process.env.GIT_AUTHOR_NAME || "SEAN WETHERELL";
 const SEED = process.env.PRIVACY_SEED
   ? Number(process.env.PRIVACY_SEED)
   : Date.now() % 1e9;
@@ -85,7 +89,9 @@ function resetHistory() {
 
 function main() {
   const reset = process.argv.includes("--reset");
-  console.log(`PrivacyScreen seed=${SEED} years=${YEARS}`);
+  console.log(
+    `PrivacyScreen seed=${SEED} years=${YEARS} author=${AUTHOR_EMAIL}`
+  );
 
   if (!existsSync(resolve(ROOT, ".git"))) {
     git("git init -b main");
@@ -128,6 +134,10 @@ function main() {
       git(`git commit -m "screen: ${cursor.toISOString().slice(0, 10)}/${i + 1}"`, {
         GIT_AUTHOR_DATE: stamp,
         GIT_COMMITTER_DATE: stamp,
+        GIT_AUTHOR_NAME: AUTHOR_NAME,
+        GIT_AUTHOR_EMAIL: AUTHOR_EMAIL,
+        GIT_COMMITTER_NAME: AUTHOR_NAME,
+        GIT_COMMITTER_EMAIL: AUTHOR_EMAIL,
       });
       totalCommits += 1;
     }
