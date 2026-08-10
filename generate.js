@@ -87,11 +87,19 @@ function resetHistory() {
   }
 }
 
+function parseArgDate(flag) {
+  const arg = process.argv.find((a) => a.startsWith(`${flag}=`));
+  if (!arg) return null;
+  const raw = arg.slice(flag.length + 1);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!m) throw new Error(`Invalid ${flag} date: ${raw} (use YYYY-MM-DD)`);
+  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+}
+
 function main() {
   const reset = process.argv.includes("--reset");
-  console.log(
-    `PrivacyScreen seed=${SEED} years=${YEARS} author=${AUTHOR_EMAIL}`
-  );
+  const fromArg = parseArgDate("--from");
+  const toArg = parseArgDate("--to");
 
   if (!existsSync(resolve(ROOT, ".git"))) {
     git("git init -b main");
@@ -102,9 +110,20 @@ function main() {
     resetHistory();
   }
 
-  const end = dayUTC(new Date());
-  const start = new Date(end);
-  start.setUTCFullYear(start.getUTCFullYear() - YEARS);
+  const end = toArg || dayUTC(new Date());
+  const start =
+    fromArg ||
+    (() => {
+      const s = new Date(end);
+      s.setUTCFullYear(s.getUTCFullYear() - YEARS);
+      return s;
+    })();
+
+  console.log(
+    `PrivacyScreen seed=${SEED} range=${start.toISOString().slice(0, 10)}..${end
+      .toISOString()
+      .slice(0, 10)} author=${AUTHOR_EMAIL}`
+  );
 
   // Seed file so first commit has content
   if (!existsSync(LOG)) {
@@ -157,10 +176,11 @@ function main() {
   }
 
   console.log(
-    `\nDone. ${totalCommits} commits across ${activeDays} active days (${YEARS} years).`
+    `\nDone. ${totalCommits} commits across ${activeDays} active days.`
   );
   console.log("Push to GitHub, then wait a minute for the contribution graph to refresh.");
   console.log(`Re-run with the same look: PRIVACY_SEED=${SEED} npm run generate -- --reset`);
+  console.log("Date window: npm run generate -- --from=2023-08-07 --to=2024-12-31");
 }
 
 main();
