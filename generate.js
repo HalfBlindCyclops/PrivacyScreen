@@ -55,7 +55,14 @@ function dayUTC(d) {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
-function commitsForDay(isWeekend) {
+/** Keep Christmas dark on the graph. */
+function isChristmas(d) {
+  return d.getUTCMonth() === 11 && d.getUTCDate() === 25;
+}
+
+function commitsForDay(d, isWeekend) {
+  if (isChristmas(d)) return 0;
+
   const chance = isWeekend ? WEEKEND_ACTIVE : WEEKDAY_ACTIVE;
   if (rand() > chance) return 0;
 
@@ -137,7 +144,7 @@ function main() {
   while (cursor <= end) {
     const dow = cursor.getUTCDay(); // 0 Sun … 6 Sat
     const isWeekend = dow === 0 || dow === 6;
-    const n = commitsForDay(isWeekend);
+    const n = commitsForDay(cursor, isWeekend);
 
     if (n > 0) activeDays += 1;
 
