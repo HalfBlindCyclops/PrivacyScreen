@@ -24,11 +24,11 @@ const SEED = process.env.PRIVACY_SEED
   : Date.now() % 1e9;
 
 /** Target density: fraction of days with at least one commit (weekdays). */
-const WEEKDAY_ACTIVE = 0.82;
+const WEEKDAY_ACTIVE = Number(process.env.WEEKDAY_ACTIVE ?? 0.82);
 /** Weekend activity rate (usually a bit lower). */
-const WEEKEND_ACTIVE = 0.55;
+const WEEKEND_ACTIVE = Number(process.env.WEEKEND_ACTIVE ?? 0.55);
 /** Max commits on a single day (GitHub caps visual intensity around 4+). */
-const MAX_COMMITS = 8;
+const MAX_COMMITS = Number(process.env.MAX_COMMITS ?? 8);
 
 // Mulberry32 PRNG — reproducible if you set PRIVACY_SEED
 function mulberry32(a) {
@@ -68,11 +68,18 @@ function commitsForDay(d, isWeekend) {
 
   // Weighted intensity: more light/medium days than heavy — looks organic
   const roll = rand();
+  if (MAX_COMMITS <= 1) return 1;
+  if (MAX_COMMITS <= 2) return roll < 0.7 ? 1 : 2;
+  if (MAX_COMMITS <= 3) {
+    if (roll < 0.55) return 1;
+    if (roll < 0.85) return 2;
+    return 3;
+  }
   if (roll < 0.42) return 1;
   if (roll < 0.68) return 2;
-  if (roll < 0.84) return 3;
-  if (roll < 0.93) return 4 + Math.floor(rand() * 2); // 4–5
-  return 6 + Math.floor(rand() * (MAX_COMMITS - 5)); // 6–8
+  if (roll < 0.84) return Math.min(3, MAX_COMMITS);
+  if (roll < 0.93) return Math.min(4 + Math.floor(rand() * 2), MAX_COMMITS);
+  return Math.min(6 + Math.floor(rand() * Math.max(1, MAX_COMMITS - 5)), MAX_COMMITS);
 }
 
 function git(cmd, env = {}) {
@@ -129,7 +136,7 @@ function main() {
   console.log(
     `PrivacyScreen seed=${SEED} range=${start.toISOString().slice(0, 10)}..${end
       .toISOString()
-      .slice(0, 10)} author=${AUTHOR_EMAIL}`
+      .slice(0, 10)} author=${AUTHOR_EMAIL} density=${WEEKDAY_ACTIVE}/${WEEKEND_ACTIVE} max=${MAX_COMMITS}`
   );
 
   // Seed file so first commit has content
